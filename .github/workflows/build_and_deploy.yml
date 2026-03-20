@@ -1,0 +1,91 @@
+name: 📱 Build APK Release
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build_apk:
+    name: 📱 Build APK Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.0'
+          channel: 'stable'
+          cache: true
+
+      - name: Criar local.properties
+        run: |
+          FLUTTER_PATH=$(which flutter)
+          FLUTTER_SDK=$(dirname $(dirname $FLUTTER_PATH))
+          echo "flutter.sdk=$FLUTTER_SDK" > android/local.properties
+          echo "sdk.dir=$ANDROID_HOME" >> android/local.properties
+          echo "=== local.properties ==="
+          cat android/local.properties
+
+      - name: Injetar firebase_options.dart
+        env:
+          FIREBASE_WEB_API_KEY: ${{ secrets.FIREBASE_WEB_API_KEY }}
+          FIREBASE_WEB_APP_ID: ${{ secrets.FIREBASE_WEB_APP_ID }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          FIREBASE_ANDROID_API_KEY: ${{ secrets.FIREBASE_ANDROID_API_KEY }}
+          FIREBASE_ANDROID_APP_ID: ${{ secrets.FIREBASE_ANDROID_APP_ID }}
+        run: |
+          cat > lib/firebase_options.dart << EOF
+          import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
+          import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
+          class DefaultFirebaseOptions {
+            static FirebaseOptions get currentPlatform {
+              if (kIsWeb) return web;
+              switch (defaultTargetPlatform) {
+                case TargetPlatform.android: return android;
+                default: return web;
+              }
+            }
+            static const FirebaseOptions web = FirebaseOptions(
+              apiKey: '$FIREBASE_WEB_API_KEY',
+              appId: '$FIREBASE_WEB_APP_ID',
+              messagingSenderId: '$FIREBASE_MESSAGING_SENDER_ID',
+              projectId: '$FIREBASE_PROJECT_ID',
+              authDomain: '$FIREBASE_AUTH_DOMAIN',
+              storageBucket: '$FIREBASE_STORAGE_BUCKET',
+            );
+            static const FirebaseOptions android = FirebaseOptions(
+              apiKey: '$FIREBASE_ANDROID_API_KEY',
+              appId: '$FIREBASE_ANDROID_APP_ID',
+              messagingSenderId: '$FIREBASE_MESSAGING_SENDER_ID',
+              projectId: '$FIREBASE_PROJECT_ID',
+              storageBucket: '$FIREBASE_STORAGE_BUCKET',
+            );
+          }
+          EOF
+          echo "✅ firebase_options.dart injetado"
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      - name: Build APK Release
+        run: flutter build apk --release --no-tree-shake-icons
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RegulOS-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
